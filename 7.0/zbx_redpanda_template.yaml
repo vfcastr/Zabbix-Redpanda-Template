@@ -1247,10 +1247,6 @@ zabbix_export:
                   tags:
                     - tag: component
                       value: status
-                    - tag: Monitor
-                      value: Zenduty
-                    - tag: Team
-                      value: Infra
           master_item:
             key: redpanda.raw
           preprocessing:
