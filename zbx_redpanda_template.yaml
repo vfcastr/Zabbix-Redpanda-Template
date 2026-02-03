@@ -1,0 +1,1767 @@
+zabbix_export:
+  version: '7.0'
+  template_groups:
+    - uuid: 7df96b18c230490a9a0a9e2307226338
+      name: Templates
+    - uuid: a571c0d144b14fd4a87a9d9b2aa9fcd6
+      name: Templates/Applications
+  templates:
+    - uuid: 0ef4eb253997402b84e747b4b1eb9af9
+      template: 'Redpanda by HTTP'
+      name: 'Redpanda by HTTP'
+      groups:
+        - name: Templates
+        - name: Templates/Applications
+      items:
+        - uuid: dedf25db5c9c4f35b7fce69c7cb47238
+          name: 'Redpanda prom metrics'
+          type: HTTP_AGENT
+          key: redpanda.prom.metrics
+          delay: 2m
+          value_type: CHAR
+          trends: '0'
+          preprocessing:
+            - type: PROMETHEUS_TO_JSON
+              parameters:
+                - ''
+          url: '{$REDPANDA.PROTOCOL}://{$REDPANDA.HOST}:9644/public_metrics'
+        - uuid: 2159c05047d9467a8ba0b36ec2de93a3
+          name: 'Redpanda cluster view raw'
+          type: HTTP_AGENT
+          key: redpanda.cluster.view.raw
+          delay: 2m
+          value_type: TEXT
+          trends: '0'
+          description: 'Raw data from Redpanda Admin API cluster_view endpoint'
+          url: '{$REDPANDA.PROTOCOL}://{$REDPANDA.HOST}:9644/v1/cluster_view'
+        # ============================================
+        # CLUSTER VIEW METRICS (from Admin API)
+        # ============================================
+        - uuid: b101cecf18ff41c8a741d728ba9be832
+          name: 'Redpanda: Cluster total brokers'
+          type: DEPENDENT
+          key: redpanda.cluster.brokers.total
+          delay: '0'
+          value_type: UNSIGNED
+          description: 'Total number of brokers in the cluster'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.brokers.length()'
+          master_item:
+            key: redpanda.cluster.view.raw
+          tags:
+            - tag: component
+              value: cluster
+        - uuid: 7ed49f616be6455483200d1af62b6551
+          name: 'Redpanda: Cluster brokers online'
+          type: DEPENDENT
+          key: redpanda.cluster.brokers.online
+          delay: '0'
+          value_type: UNSIGNED
+          description: 'Number of brokers that are alive/online in the cluster'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - 'var data = JSON.parse(value); var count = 0; for (var i = 0; i < data.brokers.length; i++) { if (data.brokers[i].is_alive === true) count++; } return count;'
+          master_item:
+            key: redpanda.cluster.view.raw
+          tags:
+            - tag: component
+              value: cluster
+          triggers:
+            - uuid: 8127405317584c49bd1fcd93a34be842
+              expression: 'last(/Redpanda by HTTP/redpanda.cluster.brokers.online)<last(/Redpanda by HTTP/redpanda.cluster.brokers.total)'
+              name: 'Redpanda: Some brokers are offline'
+              priority: HIGH
+              description: 'Not all brokers in the cluster are online'
+              tags:
+                - tag: component
+                  value: cluster
+                - tag: Monitor
+                  value: Zenduty
+                - tag: Team
+                  value: Infra
+        - uuid: a1875aad79b94cf7a6c6a02d43669778
+          name: 'Redpanda: Cluster brokers in maintenance'
+          type: DEPENDENT
+          key: redpanda.cluster.brokers.maintenance
+          delay: '0'
+          value_type: UNSIGNED
+          description: 'Number of brokers currently in maintenance mode (draining)'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - 'var data = JSON.parse(value); var count = 0; for (var i = 0; i < data.brokers.length; i++) { if (data.brokers[i].maintenance_status && data.brokers[i].maintenance_status.draining === true) count++; } return count;'
+          master_item:
+            key: redpanda.cluster.view.raw
+          tags:
+            - tag: component
+              value: cluster
+        - uuid: ccd0bfc2223240d29f9fe79cb7aa4c5e
+          name: 'Redpanda: Cluster brokers in recovery mode'
+          type: DEPENDENT
+          key: redpanda.cluster.brokers.recovery
+          delay: '0'
+          value_type: UNSIGNED
+          description: 'Number of brokers in recovery mode'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - 'var data = JSON.parse(value); var count = 0; for (var i = 0; i < data.brokers.length; i++) { if (data.brokers[i].recovery_mode_enabled === true) count++; } return count;'
+          master_item:
+            key: redpanda.cluster.view.raw
+          tags:
+            - tag: component
+              value: cluster
+          triggers:
+            - uuid: 8ed87b002d314e7c90f7bb3ddfcedd37
+              expression: 'last(/Redpanda by HTTP/redpanda.cluster.brokers.recovery)>0'
+              name: 'Redpanda: Brokers in recovery mode detected'
+              priority: WARNING
+              description: 'Some brokers are in recovery mode'
+              tags:
+                - tag: component
+                  value: cluster
+        - uuid: c14cf022a6914b2582f3b90ae9cacdf3
+          name: 'Redpanda: Cluster total cores'
+          type: DEPENDENT
+          key: redpanda.cluster.total.cores
+          delay: '0'
+          value_type: UNSIGNED
+          description: 'Total number of CPU cores across all brokers in the cluster'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.brokers[*].num_cores'
+            - type: JAVASCRIPT
+              parameters:
+                - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+          master_item:
+            key: redpanda.cluster.view.raw
+          tags:
+            - tag: component
+              value: cluster
+        - uuid: 19f16e741a05409e9d9364b103d57e08
+          name: 'Redpanda: Cluster total disk free'
+          type: DEPENDENT
+          key: redpanda.cluster.disk.free
+          delay: '0'
+          value_type: UNSIGNED
+          units: B
+          description: 'Total free disk space across all brokers in the cluster'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.brokers[*].disk_space[0].free'
+            - type: JAVASCRIPT
+              parameters:
+                - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+          master_item:
+            key: redpanda.cluster.view.raw
+          tags:
+            - tag: component
+              value: cluster
+        - uuid: dbf6b18a1abe4c49ba3ad34b9312c94a
+          name: 'Redpanda: Cluster total disk size'
+          type: DEPENDENT
+          key: redpanda.cluster.disk.total
+          delay: '0'
+          value_type: UNSIGNED
+          units: B
+          description: 'Total disk space across all brokers in the cluster'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.brokers[*].disk_space[0].total'
+            - type: JAVASCRIPT
+              parameters:
+                - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+          master_item:
+            key: redpanda.cluster.view.raw
+          tags:
+            - tag: component
+              value: cluster
+        - uuid: 6fa8eb2008bd481c9980252e179cbbf5
+          name: 'Redpanda: Cluster disk used percentage'
+          type: CALCULATED
+          key: redpanda.cluster.disk.pused
+          delay: 2m
+          value_type: FLOAT
+          units: '%'
+          description: 'Percentage of total cluster disk space used'
+          params: '100 - (last(//redpanda.cluster.disk.free) / last(//redpanda.cluster.disk.total) * 100)'
+          tags:
+            - tag: component
+              value: cluster
+          triggers:
+            - uuid: d2f5ea74bd424abc95756607adeb3e73
+              expression: 'last(/Redpanda by HTTP/redpanda.cluster.disk.pused)>{$REDPANDA.DISK.WARN.PUSED}'
+              name: 'Redpanda: Cluster disk usage is high (>{$REDPANDA.DISK.WARN.PUSED}%)'
+              priority: WARNING
+              tags:
+                - tag: component
+                  value: cluster
+            - uuid: d7507fee2d93413eb31aa8b673cbbbc8
+              expression: 'last(/Redpanda by HTTP/redpanda.cluster.disk.pused)>{$REDPANDA.DISK.CRIT.PUSED}'
+              name: 'Redpanda: Cluster disk usage is critical (>{$REDPANDA.DISK.CRIT.PUSED}%)'
+              priority: HIGH
+              tags:
+                - tag: component
+                  value: cluster
+        # ============================================
+        # CLUSTER & APPLICATION METRICS
+        # ============================================
+        - uuid: 49d192ce4dc54a8aace81880a5dbd581
+          name: 'Redpanda: Application uptime'
+          type: DEPENDENT
+          key: redpanda.application.uptime
+          delay: '0'
+          value_type: FLOAT
+          units: s
+          description: 'Total uptime of the Redpanda application in seconds'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_application_uptime_seconds_total")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: application
+        - uuid: 0bbcaea231b8497bae58bcba3b24b60e
+          name: 'Redpanda: Application version'
+          type: DEPENDENT
+          key: redpanda.application.version
+          delay: '0'
+          value_type: CHAR
+          trends: '0'
+          description: 'Redpanda application version'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_application_build")].labels.redpanda_version.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: application
+          triggers:
+            - uuid: efae5d66504f4a93be2d73c82046347f
+              expression: 'change(/Redpanda by HTTP/redpanda.application.version)<>0'
+              name: 'Redpanda: Application version changed'
+              priority: INFO
+              description: 'Redpanda version has changed, possibly due to an upgrade'
+              manual_close: 'YES'
+              tags:
+                - tag: component
+                  value: application
+        - uuid: b6ec40d0549a43368f25ed05f77626e0
+          name: 'Redpanda: Application revision'
+          type: DEPENDENT
+          key: redpanda.application.revision
+          delay: '0'
+          value_type: CHAR
+          trends: '0'
+          description: 'Redpanda application git revision'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_application_build")].labels.redpanda_revision.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: application
+        - uuid: 1993d5c9f2c8408e8c7d2868698ddf99
+          name: 'Redpanda: FIPS mode enabled'
+          type: DEPENDENT
+          key: redpanda.application.fips
+          delay: '0'
+          value_type: UNSIGNED
+          description: 'Whether FIPS mode is enabled (1) or not (0)'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_application_fips_mode")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: application
+        - uuid: 1a00d67bea7e4715a9237dfb49a165bb
+          name: 'Redpanda: Number of CPU cores/shards'
+          type: DEPENDENT
+          key: redpanda.cluster.cores
+          delay: '0'
+          value_type: UNSIGNED
+          description: 'Number of CPU cores/shards used by Redpanda (derived from CPU metrics count)'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_cpu_busy_seconds_total")].value'
+            - type: JAVASCRIPT
+              parameters:
+                - 'return JSON.parse(value).length;'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: cluster
+        - uuid: 9f59d871069a4ad2a104efb6f96cab94
+          name: 'Redpanda: Enterprise license expiry'
+          type: DEPENDENT
+          key: redpanda.cluster.license.expiry
+          delay: '0'
+          value_type: FLOAT
+          units: s
+          description: 'Number of seconds until enterprise license expires'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_cluster_features_enterprise_license_expiry_sec")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: cluster
+          triggers:
+            - uuid: 5088568b896b480fac169dd297a07dbd
+              expression: 'last(/Redpanda by HTTP/redpanda.cluster.license.expiry)<604800 and last(/Redpanda by HTTP/redpanda.cluster.license.expiry)>0'
+              name: 'Redpanda: Enterprise license expires in less than 7 days'
+              priority: WARNING
+              manual_close: 'YES'
+              tags:
+                - tag: component
+                  value: license
+        - uuid: f36dfd552af944c18166e061fd2ee7cd
+          name: 'Redpanda: Partitions with broken rack constraint'
+          type: DEPENDENT
+          key: redpanda.cluster.partition.broken.rack
+          delay: '0'
+          value_type: UNSIGNED
+          description: 'Number of partitions with broken rack constraint'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_cluster_partition_num_with_broken_rack_constraint")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: cluster
+          triggers:
+            - uuid: 6a3d60c59e3542c7bf5b156bcbd7995c
+              expression: 'last(/Redpanda by HTTP/redpanda.cluster.partition.broken.rack)>0'
+              name: 'Redpanda: Partitions with broken rack constraint detected'
+              priority: WARNING
+              description: 'Some partitions have broken rack constraints which may affect fault tolerance'
+              tags:
+                - tag: component
+                  value: cluster
+        - uuid: 414eb94143be4e568745acaab3b9169c
+          name: 'Redpanda: Queued node operations'
+          type: DEPENDENT
+          key: redpanda.cluster.queued.operations
+          delay: '0'
+          value_type: UNSIGNED
+          description: 'Number of node operations queued in the cluster members backend'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_cluster_members_backend_queued_node_operations")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: cluster
+        - uuid: 7a327451195a43c684f228b794adedf6
+          name: 'Redpanda: Partition movements being cancelled'
+          type: DEPENDENT
+          key: redpanda.cluster.partition.cancelling
+          delay: '0'
+          value_type: UNSIGNED
+          description: 'Number of partition movements being cancelled'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_cluster_partition_node_cancelling_movements")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: cluster
+        - uuid: deb4f465f505448ca246ecc597beed27
+          name: 'Redpanda: Partitions moving from node'
+          type: DEPENDENT
+          key: redpanda.cluster.partition.moving.from
+          delay: '0'
+          value_type: FLOAT
+          description: 'Number of partitions currently moving from this node'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_cluster_partition_moving_from_node")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: cluster
+        - uuid: 80a4bcbd24b84ddb837e8dd41e1e7da5
+          name: 'Redpanda: Partitions moving to node'
+          type: DEPENDENT
+          key: redpanda.cluster.partition.moving.to
+          delay: '0'
+          value_type: FLOAT
+          description: 'Number of partitions currently moving to this node'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_cluster_partition_moving_to_node")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: cluster
+        # ============================================
+        # STORAGE METRICS
+        # ============================================
+        - uuid: 9f7a346a33cd477fa865aaf95ed8bb0e
+          name: 'Redpanda: Storage disk total bytes'
+          type: DEPENDENT
+          key: redpanda.storage.disk.total
+          delay: '0'
+          value_type: FLOAT
+          units: B
+          description: 'Total size of attached storage in bytes'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_storage_disk_total_bytes")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: storage
+        - uuid: ddfa58992b344bb98ae423939a2a6263
+          name: 'Redpanda: Storage disk free bytes'
+          type: DEPENDENT
+          key: redpanda.storage.disk.free
+          delay: '0'
+          value_type: FLOAT
+          units: B
+          description: 'Free disk storage in bytes'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_storage_disk_free_bytes")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: storage
+        - uuid: 6bea24b33b2645f086dca9490c78a1c2
+          name: 'Redpanda: Storage disk used percentage'
+          type: CALCULATED
+          key: redpanda.storage.disk.pused
+          delay: 2m
+          value_type: FLOAT
+          units: '%'
+          description: 'Percentage of disk storage used'
+          params: '100 - (last(//redpanda.storage.disk.free) / last(//redpanda.storage.disk.total) * 100)'
+          tags:
+            - tag: component
+              value: storage
+          triggers:
+            - uuid: 1848abf6db4e43c3bc868b969bb7857a
+              expression: 'last(/Redpanda by HTTP/redpanda.storage.disk.pused)>{$REDPANDA.DISK.WARN.PUSED}'
+              name: 'Redpanda: Storage disk usage is high (>{$REDPANDA.DISK.WARN.PUSED}%)'
+              priority: WARNING
+              tags:
+                - tag: component
+                  value: storage
+            - uuid: 8ecc03b6aeb24f31926513efb66efbdd
+              expression: 'last(/Redpanda by HTTP/redpanda.storage.disk.pused)>{$REDPANDA.DISK.CRIT.PUSED}'
+              name: 'Redpanda: Storage disk usage is critical (>{$REDPANDA.DISK.CRIT.PUSED}%)'
+              priority: HIGH
+              tags:
+                - tag: component
+                  value: storage
+        - uuid: 8f6cabb19d1347058b8887b029ecf2a5
+          name: 'Redpanda: Storage disk free space alert'
+          type: DEPENDENT
+          key: redpanda.storage.disk.alert
+          delay: '0'
+          value_type: FLOAT
+          description: 'Status of low storage space alert. 0-OK, 1-Low Space 2-Degraded'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_storage_disk_free_space_alert")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: storage
+          triggers:
+            - uuid: d14119ba2f0d41949b349d3b119a7378
+              expression: 'last(/Redpanda by HTTP/redpanda.storage.disk.alert)=1'
+              name: 'Redpanda: Storage disk space is low'
+              priority: WARNING
+              tags:
+                - tag: component
+                  value: storage
+            - uuid: 7eb5cbbbb5454f1f8eb8f2c205a1fcde
+              expression: 'last(/Redpanda by HTTP/redpanda.storage.disk.alert)=2'
+              name: 'Redpanda: Storage disk space is degraded'
+              priority: HIGH
+              tags:
+                - tag: component
+                  value: storage
+        # ============================================
+        # MEMORY METRICS
+        # ============================================
+        - uuid: 0771fd49e2604e9c8376d748ce0846a3
+          name: 'Redpanda: Memory allocated total'
+          type: DEPENDENT
+          key: redpanda.memory.allocated.total
+          delay: '0'
+          value_type: FLOAT
+          units: B
+          description: 'Total allocated memory size in bytes across all shards'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_memory_allocated_memory")].value'
+            - type: JAVASCRIPT
+              parameters:
+                - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: memory
+        - uuid: 8e308e7f5c33461489dce24c34db135a
+          name: 'Redpanda: Memory available total'
+          type: DEPENDENT
+          key: redpanda.memory.available.total
+          delay: '0'
+          value_type: FLOAT
+          units: B
+          description: 'Total shard memory potentially available in bytes (free_memory plus reclaimable)'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_memory_available_memory")].value'
+            - type: JAVASCRIPT
+              parameters:
+                - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: memory
+        - uuid: c5d31c1b5e2745fc85b7ae9fef6649ef
+          name: 'Redpanda: Memory free total'
+          type: DEPENDENT
+          key: redpanda.memory.free.total
+          delay: '0'
+          value_type: FLOAT
+          units: B
+          description: 'Total free memory size in bytes across all shards'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_memory_free_memory")].value'
+            - type: JAVASCRIPT
+              parameters:
+                - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: memory
+        # ============================================
+        # KAFKA METRICS
+        # ============================================
+        - uuid: 8df8fca50d6f4c6f9023f13ebdaf3d40
+          name: 'Redpanda: Kafka total partitions'
+          type: DEPENDENT
+          key: redpanda.kafka.partitions.total
+          delay: '0'
+          value_type: FLOAT
+          description: 'Total number of Kafka partitions'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_kafka_partitions")].value'
+            - type: JAVASCRIPT
+              parameters:
+                - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: kafka
+        - uuid: 1771972784a44010a098a267727a64aa
+          name: 'Redpanda: Kafka total replicas'
+          type: DEPENDENT
+          key: redpanda.kafka.replicas.total
+          delay: '0'
+          value_type: FLOAT
+          description: 'Total number of Kafka replicas'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_kafka_replicas")].value'
+            - type: JAVASCRIPT
+              parameters:
+                - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: kafka
+        - uuid: b9023013e38845a1939d18bd262f9874
+          name: 'Redpanda: Kafka under-replicated replicas'
+          type: DEPENDENT
+          key: redpanda.kafka.under.replicated
+          delay: '0'
+          value_type: FLOAT
+          description: 'Number of under replicated replicas (replicas that are live, but not at the latest offset)'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_kafka_under_replicated_replicas")].value'
+            - type: JAVASCRIPT
+              parameters:
+                - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: kafka
+          triggers:
+            - uuid: 0a133f1603124a7587170d228f62eb14
+              expression: 'last(/Redpanda by HTTP/redpanda.kafka.under.replicated)>0'
+              name: 'Redpanda: Under-replicated partitions detected'
+              priority: WARNING
+              description: 'Some partitions have under-replicated replicas'
+              tags:
+                - tag: component
+                  value: kafka
+        - uuid: 597cd523e56149c4ab657ff113bcab45
+          name: 'Redpanda: Kafka records produced total'
+          type: DEPENDENT
+          key: redpanda.kafka.records.produced
+          delay: '0'
+          value_type: FLOAT
+          description: 'Total number of records produced'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_kafka_records_produced_total")].value'
+            - type: JAVASCRIPT
+              parameters:
+                - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: kafka
+        - uuid: f83d49f1200e4d47b296fc71e9811969
+          name: 'Redpanda: Kafka records fetched total'
+          type: DEPENDENT
+          key: redpanda.kafka.records.fetched
+          delay: '0'
+          value_type: FLOAT
+          description: 'Total number of records fetched'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_kafka_records_fetched_total")].value'
+            - type: JAVASCRIPT
+              parameters:
+                - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: kafka
+        - uuid: 5df169c4257e44cea8c3117774e4b821
+          name: 'Redpanda: Kafka request bytes total'
+          type: DEPENDENT
+          key: redpanda.kafka.request.bytes
+          delay: '0'
+          value_type: FLOAT
+          units: B
+          description: 'Total bytes of Kafka requests'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_kafka_request_bytes_total")].value'
+            - type: JAVASCRIPT
+              parameters:
+                - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: kafka
+        - uuid: 3afd1f999d694f15b4cd76d376e4e806
+          name: 'Redpanda: Consumer groups count'
+          type: DEPENDENT
+          key: redpanda.kafka.consumer.groups
+          delay: '0'
+          value_type: FLOAT
+          description: 'Number of consumer group consumers'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_kafka_consumer_group_consumers")].value'
+            - type: JAVASCRIPT
+              parameters:
+                - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: kafka
+        # ============================================
+        # RPC METRICS
+        # ============================================
+        - uuid: 15afbd8b36f9497ba666b4d436571a8e
+          name: 'Redpanda: RPC active connections (Kafka)'
+          type: DEPENDENT
+          key: redpanda.rpc.connections.kafka
+          delay: '0'
+          value_type: FLOAT
+          description: 'Count of currently active Kafka connections'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_rpc_active_connections" && @.labels.redpanda_server=="kafka")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: rpc
+        - uuid: 221800880cf842c08411e4d23a1e7f93
+          name: 'Redpanda: RPC active connections (Internal)'
+          type: DEPENDENT
+          key: redpanda.rpc.connections.internal
+          delay: '0'
+          value_type: FLOAT
+          description: 'Count of currently active internal connections'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_rpc_active_connections" && @.labels.redpanda_server=="internal")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: rpc
+        - uuid: 87d1e18d5bdb4e16afbf9dc4c4848086
+          name: 'Redpanda: RPC request errors (Kafka)'
+          type: DEPENDENT
+          key: redpanda.rpc.errors.kafka
+          delay: '0'
+          value_type: FLOAT
+          description: 'Number of Kafka RPC errors'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_rpc_request_errors_total" && @.labels.redpanda_server=="kafka")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: rpc
+        - uuid: 7604369ad14544fea36c795873cc6f4b
+          name: 'Redpanda: RPC request errors (Internal)'
+          type: DEPENDENT
+          key: redpanda.rpc.errors.internal
+          delay: '0'
+          value_type: FLOAT
+          description: 'Number of internal RPC errors'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_rpc_request_errors_total" && @.labels.redpanda_server=="internal")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: rpc
+        - uuid: 79e1a0dc6e0749c0b05aea0614687548
+          name: 'Redpanda: RPC received bytes (Kafka)'
+          type: DEPENDENT
+          key: redpanda.rpc.received.kafka
+          delay: '0'
+          value_type: FLOAT
+          units: B
+          description: 'Number of bytes received from Kafka clients'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_rpc_received_bytes" && @.labels.redpanda_server=="kafka")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: rpc
+        - uuid: ac28e7375f7340c2a347a4dda74a7615
+          name: 'Redpanda: RPC sent bytes (Kafka)'
+          type: DEPENDENT
+          key: redpanda.rpc.sent.kafka
+          delay: '0'
+          value_type: FLOAT
+          units: B
+          description: 'Number of bytes sent to Kafka clients'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_rpc_sent_bytes" && @.labels.redpanda_server=="kafka")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: rpc
+        # ============================================
+        # RAFT METRICS
+        # ============================================
+        - uuid: 1249fd1ef14f49468596f4ff80c34d11
+          name: 'Redpanda: Raft leadership changes'
+          type: DEPENDENT
+          key: redpanda.raft.leadership.changes
+          delay: '0'
+          value_type: FLOAT
+          description: 'Number of won leader elections across all partitions'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_raft_leadership_changes")].value'
+            - type: JAVASCRIPT
+              parameters:
+                - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: raft
+        - uuid: c7f10e49895d460697ab09869c48b298
+          name: 'Redpanda: Raft recovery partitions to recover'
+          type: DEPENDENT
+          key: redpanda.raft.recovery.partitions
+          delay: '0'
+          value_type: FLOAT
+          description: 'Number of partition replicas that have to recover for this node'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_raft_recovery_partitions_to_recover")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: raft
+          triggers:
+            - uuid: ab89bb21c22f4925908ef60cf33acbcd
+              expression: 'last(/Redpanda by HTTP/redpanda.raft.recovery.partitions)>0'
+              name: 'Redpanda: Partitions recovering'
+              priority: INFO
+              description: 'There are partitions being recovered'
+              tags:
+                - tag: component
+                  value: raft
+        - uuid: 05392ef94cb94fdcafb0458342fbf43f
+          name: 'Redpanda: Raft recovery partitions active'
+          type: DEPENDENT
+          key: redpanda.raft.recovery.active
+          delay: '0'
+          value_type: FLOAT
+          description: 'Number of partition replicas currently recovering on this node'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_raft_recovery_partitions_active")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: raft
+        - uuid: f08e82fb1ccb4b959dddf90cacef77d9
+          name: 'Redpanda: Raft recovery offsets pending'
+          type: DEPENDENT
+          key: redpanda.raft.recovery.offsets
+          delay: '0'
+          value_type: FLOAT
+          description: 'Sum of offsets that partitions on this node need to recover'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_raft_recovery_offsets_pending")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: raft
+        # ============================================
+        # NODE STATUS METRICS
+        # ============================================
+        - uuid: eeec8e8521ce4e15a8de3196a426bac7
+          name: 'Redpanda: Node status RPCs received'
+          type: DEPENDENT
+          key: redpanda.node.rpcs.received
+          delay: '0'
+          value_type: FLOAT
+          description: 'Number of node status RPCs received by this node'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_node_status_rpcs_received")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: node
+        - uuid: 331780b71fa2435caa322a7d7ea05ec4
+          name: 'Redpanda: Node status RPCs sent'
+          type: DEPENDENT
+          key: redpanda.node.rpcs.sent
+          delay: '0'
+          value_type: FLOAT
+          description: 'Number of node status RPCs sent by this node'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_node_status_rpcs_sent")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: node
+        - uuid: 2264a6be23164f3f869ae5e09913948d
+          name: 'Redpanda: Node status RPCs timed out'
+          type: DEPENDENT
+          key: redpanda.node.rpcs.timedout
+          delay: '0'
+          value_type: FLOAT
+          description: 'Number of timed out node status RPCs from this node'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_node_status_rpcs_timed_out")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: node
+          triggers:
+            - uuid: a2b28001ccb14cca9a1ba3553103c5e9
+              expression: 'change(/Redpanda by HTTP/redpanda.node.rpcs.timedout)>5'
+              name: 'Redpanda: Node status RPCs timing out'
+              priority: WARNING
+              description: 'More than 5 node status RPCs have timed out in the last check'
+              tags:
+                - tag: component
+                  value: node
+        # ============================================
+        # IO QUEUE METRICS
+        # ============================================
+        - uuid: f23f3cfabb6748959125aa54c6b30d6a
+          name: 'Redpanda: IO queue total read ops'
+          type: DEPENDENT
+          key: redpanda.io.read.ops
+          delay: '0'
+          value_type: FLOAT
+          description: 'Total read operations in IO queue'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_io_queue_total_read_ops")].value'
+            - type: JAVASCRIPT
+              parameters:
+                - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: io
+        - uuid: 017bf4b7d4364c0db7317516321c82de
+          name: 'Redpanda: IO queue total write ops'
+          type: DEPENDENT
+          key: redpanda.io.write.ops
+          delay: '0'
+          value_type: FLOAT
+          description: 'Total write operations in IO queue'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_io_queue_total_write_ops")].value'
+            - type: JAVASCRIPT
+              parameters:
+                - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: io
+        # ============================================
+        # CPU METRICS
+        # ============================================
+        - uuid: a02ab9e8a9ef4b88a777d04bd6878b7b
+          name: 'Redpanda: CPU busy seconds total'
+          type: DEPENDENT
+          key: redpanda.cpu.busy.total
+          delay: '0'
+          value_type: FLOAT
+          units: s
+          description: 'Total CPU busy time in seconds'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_cpu_busy_seconds_total")].value'
+            - type: JAVASCRIPT
+              parameters:
+                - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: cpu
+        # ============================================
+        # REST PROXY METRICS
+        # ============================================
+        - uuid: 7796c1b70e094f2abdc38d0775ddff8e
+          name: 'Redpanda: REST Proxy errors 5xx'
+          type: DEPENDENT
+          key: redpanda.rest.errors.5xx
+          delay: '0'
+          value_type: FLOAT
+          description: 'Total number of REST proxy 5xx server errors'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_rest_proxy_request_errors_total" && @.labels.redpanda_status=="5xx")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: rest_proxy
+        - uuid: 6107a94dc9374696953ca25f2e4c9d22
+          name: 'Redpanda: REST Proxy errors 4xx'
+          type: DEPENDENT
+          key: redpanda.rest.errors.4xx
+          delay: '0'
+          value_type: FLOAT
+          description: 'Total number of REST proxy 4xx client errors'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_rest_proxy_request_errors_total" && @.labels.redpanda_status=="4xx")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: rest_proxy
+        # ============================================
+        # SCHEMA REGISTRY METRICS
+        # ============================================
+        - uuid: 66ee04ea899144a08e5cdc3185d0792e
+          name: 'Redpanda: Schema Registry schema count'
+          type: DEPENDENT
+          key: redpanda.schema.registry.count
+          delay: '0'
+          value_type: FLOAT
+          description: 'The number of schemas in the store'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_schema_registry_cache_schema_count")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: schema_registry
+        - uuid: 963baff15eb646828b810c38d9456183
+          name: 'Redpanda: Schema Registry errors 5xx'
+          type: DEPENDENT
+          key: redpanda.schema.registry.errors.5xx
+          delay: '0'
+          value_type: FLOAT
+          description: 'Total number of Schema Registry 5xx server errors'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_schema_registry_request_errors_total" && @.labels.redpanda_status=="5xx")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: schema_registry
+        - uuid: 7d6981dea581480faac8785ff4684639
+          name: 'Redpanda: Schema Registry errors 4xx'
+          type: DEPENDENT
+          key: redpanda.schema.registry.errors.4xx
+          delay: '0'
+          value_type: FLOAT
+          description: 'Total number of Schema Registry 4xx client errors'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_schema_registry_request_errors_total" && @.labels.redpanda_status=="4xx")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: schema_registry
+        # ============================================
+        # SECURITY METRICS
+        # ============================================
+        - uuid: 86bcb8226126443a88418610ab21810e
+          name: 'Redpanda: Security audit errors'
+          type: DEPENDENT
+          key: redpanda.security.audit.errors
+          delay: '0'
+          value_type: FLOAT
+          description: 'Running count of errors in creating/publishing audit event log entries'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[?(@.name=="redpanda_security_audit_errors_total")].value.first()'
+          master_item:
+            key: redpanda.prom.metrics
+          tags:
+            - tag: component
+              value: security
+        - uuid: 730291a32b8c4f50960ebeaacceb551c
+          name: 'Redpanda raw'
+          type: HTTP_AGENT
+          key: redpanda.raw
+          delay: 2m
+          value_type: CHAR
+          trends: '0'
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  try {
+                      var input = JSON.parse(value);
+                      var connectors = input.body; 
+                      
+                      // Agora inicializamos como um objeto {} em vez de array []
+                      var finalResult = {};
+                  
+                      connectors.forEach(function(connectorName) {
+                          var url = "{$REDPANDA.PROTOCOL}://{$REDPANDA.HOST}:{$REDPANDA.PORT}/connectors/" + connectorName + "/status";
+                          
+                          var request = new HttpRequest();
+                          request.addHeader('Content-Type: application/json');
+                          
+                          var response = request.get(url);
+                  
+                          if (request.getStatus() === 200) {
+                              var data = JSON.parse(response);
+                              
+                              // Usamos o nome do conector como a chave do objeto
+                              finalResult[connectorName] = {
+                                  "name": data.name,
+                                  "state": data.connector.state,
+                                  "worker_id": data.connector.worker_id,
+                                  "type": data.type,
+                                  "tasks_list": data.tasks.map(function(t) {
+                                      return {
+                                          "task_id": t.id.toString(),
+                                          "task_state": t.state,
+                                          "task_worker": t.worker_id
+                                      };
+                                  })
+                              };
+                          }
+                      });
+                  
+                      return JSON.stringify(finalResult);
+                  
+                  } catch (error) {
+                      return JSON.stringify({ "error": error.toString(), "input_received": value });
+                  }
+          url: '{$REDPANDA.PROTOCOL}://{$REDPANDA.HOST}:{$REDPANDA.PORT}/connectors'
+          output_format: JSON
+      discovery_rules:
+        - uuid: e722c4b641004a08b068a70e5c7c9254
+          name: 'Redpanda Connectors'
+          type: DEPENDENT
+          key: redpanda.connectors
+          delay: '0'
+          item_prototypes:
+            - uuid: 68c1ff1e2f354eaaba3196f9fc64892f
+              name: 'Redpanda: [{#CONNECTORS}]: Connector Status'
+              type: DEPENDENT
+              key: 'redpanda.connector.status[{#CONNECTORS}]'
+              delay: '0'
+              value_type: CHAR
+              trends: '0'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$..[''{#CONNECTORS}''].state.first()'
+              master_item:
+                key: redpanda.raw
+              trigger_prototypes:
+                - uuid: ee78235439154339aa95ecbff55a4044
+                  expression: 'find(/Redpanda by HTTP/redpanda.connector.status[{#CONNECTORS}],#2,"like","RUNNING")=0'
+                  recovery_mode: RECOVERY_EXPRESSION
+                  recovery_expression: 'find(/Redpanda by HTTP/redpanda.connector.status[{#CONNECTORS}],#2,"like","RUNNING")=1'
+                  name: 'Redpanda: [{#CONNECTORS}]: Erro CDC - Connector esta PARADO'
+                  priority: DISASTER
+                  manual_close: 'YES'
+                  tags:
+                    - tag: component
+                      value: status
+            - uuid: aeed68078aa845ebba72d2b4f45e9f8c
+              name: 'Redpanda: [{#CONNECTORS}]: Connector Task {#TASKS.ID} Status'
+              type: DEPENDENT
+              key: 'redpanda.connector.task.status[{#CONNECTORS},{#TASKS.ID}]'
+              delay: '0'
+              value_type: CHAR
+              trends: '0'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.[''{#CONNECTORS}''].tasks_list[?(@.task_id == "{#TASKS.ID}")].task_state.first()'
+              master_item:
+                key: redpanda.raw
+              trigger_prototypes:
+                - uuid: bdedaf31542744999349853523605e72
+                  expression: 'find(/Redpanda by HTTP/redpanda.connector.task.status[{#CONNECTORS},{#TASKS.ID}],#2,"like","RUNNING")=0'
+                  recovery_mode: RECOVERY_EXPRESSION
+                  recovery_expression: 'find(/Redpanda by HTTP/redpanda.connector.task.status[{#CONNECTORS},{#TASKS.ID}],#2,"like","RUNNING")=1'
+                  name: 'Redpanda: [{#CONNECTORS}]: Erro CDC - Connector Task {#TASKS.ID} esta PARADO'
+                  priority: DISASTER
+                  manual_close: 'YES'
+                  tags:
+                    - tag: component
+                      value: status
+                    - tag: Monitor
+                      value: Zenduty
+                    - tag: Team
+                      value: Infra
+          master_item:
+            key: redpanda.raw
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var input = JSON.parse(value);
+                  // Se você usou uma chave como "connectors_data", acessamos ela aqui
+                  var data = input.connectors_data || input; 
+                  var lld = [];
+                  
+                  for (var connName in data) {
+                      // Para cada task, criamos uma entrada na LLD
+                      data[connName].tasks_list.forEach(function(task) {
+                          lld.push({
+                              "{#CONNECTORS}": connName,
+                              "{#TASKS.ID}": task.task_id
+                          });
+                      });
+                  }
+                  
+                  // O segredo: o retorno DEVE ser um array []
+                  return JSON.stringify(lld);
+        # ============================================
+        # BROKER DISCOVERY (from Admin API)
+        # ============================================
+        - uuid: 4a1b14bcd2e549cd8b494d6e4da3eca0
+          name: 'Redpanda: Broker Discovery'
+          type: DEPENDENT
+          key: redpanda.broker.discovery
+          delay: '0'
+          item_prototypes:
+            - uuid: a7d266ac258c4322891e80b5ad23a6b4
+              name: 'Redpanda: Broker [{#NODE_ID}] ({#BROKER_ADDRESS}): Is alive'
+              type: DEPENDENT
+              key: 'redpanda.broker.alive[{#NODE_ID}]'
+              delay: '0'
+              value_type: UNSIGNED
+              description: 'Whether the broker is alive (1) or not (0)'
+              valuemap:
+                name: 'Redpanda broker status'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.brokers[?(@.node_id=={#NODE_ID})].is_alive.first()'
+                - type: BOOL_TO_DECIMAL
+                  parameters:
+                    - ''
+              master_item:
+                key: redpanda.cluster.view.raw
+              tags:
+                - tag: component
+                  value: broker
+                - tag: broker
+                  value: '{#BROKER_ADDRESS}'
+              trigger_prototypes:
+                - uuid: 35c850b692c74f3c86fe97ad6a4b58cb
+                  expression: 'last(/Redpanda by HTTP/redpanda.broker.alive[{#NODE_ID}])=0'
+                  name: 'Redpanda: Broker [{#NODE_ID}] ({#BROKER_ADDRESS}) is OFFLINE'
+                  priority: DISASTER
+                  description: 'Broker {#BROKER_ADDRESS} (node_id: {#NODE_ID}) is not alive'
+                  tags:
+                    - tag: component
+                      value: broker
+                    - tag: broker
+                      value: '{#BROKER_ADDRESS}'
+                    - tag: Monitor
+                      value: Zenduty
+                    - tag: Team
+                      value: Infra
+            - uuid: 75df87b4d79d440bbf28bfab0433a28c
+              name: 'Redpanda: Broker [{#NODE_ID}] ({#BROKER_ADDRESS}): Membership status'
+              type: DEPENDENT
+              key: 'redpanda.broker.membership[{#NODE_ID}]'
+              delay: '0'
+              value_type: CHAR
+              trends: '0'
+              description: 'Membership status of the broker (active, draining, removed)'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.brokers[?(@.node_id=={#NODE_ID})].membership_status.first()'
+              master_item:
+                key: redpanda.cluster.view.raw
+              tags:
+                - tag: component
+                  value: broker
+                - tag: broker
+                  value: '{#BROKER_ADDRESS}'
+              trigger_prototypes:
+                - uuid: c86b71770b6f488d91bce293c3ed887b
+                  expression: 'find(/Redpanda by HTTP/redpanda.broker.membership[{#NODE_ID}],,"like","active")=0'
+                  name: 'Redpanda: Broker [{#NODE_ID}] ({#BROKER_ADDRESS}) membership is not active'
+                  priority: WARNING
+                  description: 'Broker {#BROKER_ADDRESS} membership status is not active'
+                  tags:
+                    - tag: component
+                      value: broker
+                    - tag: broker
+                      value: '{#BROKER_ADDRESS}'
+            - uuid: 64c4d0bf0e3c4427ab0d6514b46d8d0e
+              name: 'Redpanda: Broker [{#NODE_ID}] ({#BROKER_ADDRESS}): Maintenance draining'
+              type: DEPENDENT
+              key: 'redpanda.broker.draining[{#NODE_ID}]'
+              delay: '0'
+              value_type: UNSIGNED
+              description: 'Whether the broker is in maintenance mode and draining (1) or not (0)'
+              valuemap:
+                name: 'Redpanda broker status'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.brokers[?(@.node_id=={#NODE_ID})].maintenance_status.draining.first()'
+                - type: BOOL_TO_DECIMAL
+                  parameters:
+                    - ''
+              master_item:
+                key: redpanda.cluster.view.raw
+              tags:
+                - tag: component
+                  value: broker
+                - tag: broker
+                  value: '{#BROKER_ADDRESS}'
+              trigger_prototypes:
+                - uuid: f21742ce37134311b746624325395a61
+                  expression: 'last(/Redpanda by HTTP/redpanda.broker.draining[{#NODE_ID}])=1'
+                  name: 'Redpanda: Broker [{#NODE_ID}] ({#BROKER_ADDRESS}) is in maintenance mode'
+                  priority: INFO
+                  description: 'Broker {#BROKER_ADDRESS} is draining for maintenance'
+                  manual_close: 'YES'
+                  tags:
+                    - tag: component
+                      value: broker
+                    - tag: broker
+                      value: '{#BROKER_ADDRESS}'
+            - uuid: 60657edd076c46e2aa016c647ed58a5d
+              name: 'Redpanda: Broker [{#NODE_ID}] ({#BROKER_ADDRESS}): Recovery mode'
+              type: DEPENDENT
+              key: 'redpanda.broker.recovery[{#NODE_ID}]'
+              delay: '0'
+              value_type: UNSIGNED
+              description: 'Whether the broker is in recovery mode (1) or not (0)'
+              valuemap:
+                name: 'Redpanda broker status'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.brokers[?(@.node_id=={#NODE_ID})].recovery_mode_enabled.first()'
+                - type: BOOL_TO_DECIMAL
+                  parameters:
+                    - ''
+              master_item:
+                key: redpanda.cluster.view.raw
+              tags:
+                - tag: component
+                  value: broker
+                - tag: broker
+                  value: '{#BROKER_ADDRESS}'
+            - uuid: f4e2cffdb4bf47aa95f47822ee778a66
+              name: 'Redpanda: Broker [{#NODE_ID}] ({#BROKER_ADDRESS}): Disk free'
+              type: DEPENDENT
+              key: 'redpanda.broker.disk.free[{#NODE_ID}]'
+              delay: '0'
+              value_type: UNSIGNED
+              units: B
+              description: 'Free disk space on the broker'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.brokers[?(@.node_id=={#NODE_ID})].disk_space[0].free.first()'
+              master_item:
+                key: redpanda.cluster.view.raw
+              tags:
+                - tag: component
+                  value: broker
+                - tag: broker
+                  value: '{#BROKER_ADDRESS}'
+            - uuid: 99a3d7ec2bca430c85513874e6c82b6a
+              name: 'Redpanda: Broker [{#NODE_ID}] ({#BROKER_ADDRESS}): Disk total'
+              type: DEPENDENT
+              key: 'redpanda.broker.disk.total[{#NODE_ID}]'
+              delay: '0'
+              value_type: UNSIGNED
+              units: B
+              description: 'Total disk space on the broker'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.brokers[?(@.node_id=={#NODE_ID})].disk_space[0].total.first()'
+              master_item:
+                key: redpanda.cluster.view.raw
+              tags:
+                - tag: component
+                  value: broker
+                - tag: broker
+                  value: '{#BROKER_ADDRESS}'
+            - uuid: 55d3927821c248a689d9102ce7ecdb45
+              name: 'Redpanda: Broker [{#NODE_ID}] ({#BROKER_ADDRESS}): Disk used percentage'
+              type: CALCULATED
+              key: 'redpanda.broker.disk.pused[{#NODE_ID}]'
+              delay: 2m
+              value_type: FLOAT
+              units: '%'
+              description: 'Percentage of disk space used on the broker'
+              params: '100 - (last(//redpanda.broker.disk.free[{#NODE_ID}]) / last(//redpanda.broker.disk.total[{#NODE_ID}]) * 100)'
+              tags:
+                - tag: component
+                  value: broker
+                - tag: broker
+                  value: '{#BROKER_ADDRESS}'
+              trigger_prototypes:
+                - uuid: 9bcb96ac5a04432baa66a76f73817f7a
+                  expression: 'last(/Redpanda by HTTP/redpanda.broker.disk.pused[{#NODE_ID}])>{$REDPANDA.DISK.WARN.PUSED}'
+                  name: 'Redpanda: Broker [{#NODE_ID}] ({#BROKER_ADDRESS}) disk usage is high (>{$REDPANDA.DISK.WARN.PUSED}%)'
+                  priority: WARNING
+                  tags:
+                    - tag: component
+                      value: broker
+                    - tag: broker
+                      value: '{#BROKER_ADDRESS}'
+                - uuid: 518041cfbd0b4c85ba4975863aa8f703
+                  expression: 'last(/Redpanda by HTTP/redpanda.broker.disk.pused[{#NODE_ID}])>{$REDPANDA.DISK.CRIT.PUSED}'
+                  name: 'Redpanda: Broker [{#NODE_ID}] ({#BROKER_ADDRESS}) disk usage is critical (>{$REDPANDA.DISK.CRIT.PUSED}%)'
+                  priority: HIGH
+                  tags:
+                    - tag: component
+                      value: broker
+                    - tag: broker
+                      value: '{#BROKER_ADDRESS}'
+            - uuid: f5a92d5cb4f64ddf8036fa29c494dec1
+              name: 'Redpanda: Broker [{#NODE_ID}] ({#BROKER_ADDRESS}): Version'
+              type: DEPENDENT
+              key: 'redpanda.broker.version[{#NODE_ID}]'
+              delay: '0'
+              value_type: CHAR
+              trends: '0'
+              description: 'Redpanda version running on the broker'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.brokers[?(@.node_id=={#NODE_ID})].version.first()'
+              master_item:
+                key: redpanda.cluster.view.raw
+              tags:
+                - tag: component
+                  value: broker
+                - tag: broker
+                  value: '{#BROKER_ADDRESS}'
+            - uuid: 6fe827e1a046446e9706a43eb09f72f4
+              name: 'Redpanda: Broker [{#NODE_ID}] ({#BROKER_ADDRESS}): Num cores'
+              type: DEPENDENT
+              key: 'redpanda.broker.cores[{#NODE_ID}]'
+              delay: '0'
+              value_type: UNSIGNED
+              description: 'Number of CPU cores on the broker'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.brokers[?(@.node_id=={#NODE_ID})].num_cores.first()'
+              master_item:
+                key: redpanda.cluster.view.raw
+              tags:
+                - tag: component
+                  value: broker
+                - tag: broker
+                  value: '{#BROKER_ADDRESS}'
+          master_item:
+            key: redpanda.cluster.view.raw
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value);
+                  var lld = [];
+                  
+                  for (var i = 0; i < data.brokers.length; i++) {
+                      var broker = data.brokers[i];
+                      lld.push({
+                          "{#NODE_ID}": broker.node_id.toString(),
+                          "{#BROKER_ADDRESS}": broker.internal_rpc_address,
+                          "{#BROKER_VERSION}": broker.version
+                      });
+                  }
+                  
+                  return JSON.stringify(lld);
+        # ============================================
+        # TOPIC DISCOVERY
+        # ============================================
+        - uuid: c145f8f3deaa4e90a3c63a37cc8a91f7
+          name: 'Redpanda: Topic Discovery'
+          type: DEPENDENT
+          key: redpanda.topic.discovery
+          delay: '0'
+          filter:
+            evaltype: AND
+            conditions:
+              - macro: '{#TOPIC}'
+                value: '^(?!_|controller|id_allocator).*'
+                formulaid: A
+          item_prototypes:
+            - uuid: bebd1359167f4ea88b51bea7af4c2f4d
+              name: 'Redpanda: Topic [{#TOPIC}]: Partitions'
+              type: DEPENDENT
+              key: 'redpanda.topic.partitions[{#TOPIC}]'
+              delay: '0'
+              value_type: UNSIGNED
+              description: 'Number of partitions for topic {#TOPIC}'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$[?(@.name=="redpanda_kafka_partitions" && @.labels.redpanda_topic=="{#TOPIC}")].value'
+                - type: JAVASCRIPT
+                  parameters:
+                    - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+              master_item:
+                key: redpanda.prom.metrics
+              tags:
+                - tag: component
+                  value: topic
+                - tag: topic
+                  value: '{#TOPIC}'
+            - uuid: 2c2e7627af2d494fb9f068217f59f6f0
+              name: 'Redpanda: Topic [{#TOPIC}]: Replicas'
+              type: DEPENDENT
+              key: 'redpanda.topic.replicas[{#TOPIC}]'
+              delay: '0'
+              value_type: UNSIGNED
+              description: 'Number of replicas for topic {#TOPIC}'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$[?(@.name=="redpanda_kafka_replicas" && @.labels.redpanda_topic=="{#TOPIC}")].value'
+                - type: JAVASCRIPT
+                  parameters:
+                    - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+              master_item:
+                key: redpanda.prom.metrics
+              tags:
+                - tag: component
+                  value: topic
+                - tag: topic
+                  value: '{#TOPIC}'
+            - uuid: 14c86208545a4c5daf4392b344fa8188
+              name: 'Redpanda: Topic [{#TOPIC}]: Max offset (high watermark)'
+              type: DEPENDENT
+              key: 'redpanda.topic.max.offset[{#TOPIC}]'
+              delay: '0'
+              value_type: UNSIGNED
+              description: 'Sum of max offsets (high watermark) across all partitions for topic {#TOPIC}'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$[?(@.name=="redpanda_kafka_max_offset" && @.labels.redpanda_topic=="{#TOPIC}")].value'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: '[0]'
+                - type: JAVASCRIPT
+                  parameters:
+                    - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+              master_item:
+                key: redpanda.prom.metrics
+              tags:
+                - tag: component
+                  value: topic
+                - tag: topic
+                  value: '{#TOPIC}'
+            - uuid: 205a89d0d4484504bad24699298c0cad
+              name: 'Redpanda: Topic [{#TOPIC}]: Under-replicated replicas'
+              type: DEPENDENT
+              key: 'redpanda.topic.under.replicated[{#TOPIC}]'
+              delay: '0'
+              value_type: UNSIGNED
+              description: 'Number of under-replicated replicas for topic {#TOPIC}'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$[?(@.name=="redpanda_kafka_under_replicated_replicas" && @.labels.redpanda_topic=="{#TOPIC}")].value'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: '[0]'
+                - type: JAVASCRIPT
+                  parameters:
+                    - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+              master_item:
+                key: redpanda.prom.metrics
+              tags:
+                - tag: component
+                  value: topic
+                - tag: topic
+                  value: '{#TOPIC}'
+              trigger_prototypes:
+                - uuid: 80d75a92a7804c2e97a04e739b70c17b
+                  expression: 'last(/Redpanda by HTTP/redpanda.topic.under.replicated[{#TOPIC}])>0'
+                  name: 'Redpanda: Topic [{#TOPIC}] has under-replicated partitions'
+                  priority: WARNING
+                  description: 'Topic {#TOPIC} has partitions that are under-replicated'
+                  tags:
+                    - tag: component
+                      value: topic
+                    - tag: topic
+                      value: '{#TOPIC}'
+            - uuid: 69ac953033524c3bb096393e78976708
+              name: 'Redpanda: Topic [{#TOPIC}]: Records produced'
+              type: DEPENDENT
+              key: 'redpanda.topic.records.produced[{#TOPIC}]'
+              delay: '0'
+              value_type: UNSIGNED
+              description: 'Total records produced to topic {#TOPIC}'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$[?(@.name=="redpanda_kafka_records_produced_total" && @.labels.redpanda_topic=="{#TOPIC}")].value'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: '[0]'
+                - type: JAVASCRIPT
+                  parameters:
+                    - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+              master_item:
+                key: redpanda.prom.metrics
+              tags:
+                - tag: component
+                  value: topic
+                - tag: topic
+                  value: '{#TOPIC}'
+            - uuid: b53e8166836243f190952906c2adc9e7
+              name: 'Redpanda: Topic [{#TOPIC}]: Records fetched'
+              type: DEPENDENT
+              key: 'redpanda.topic.records.fetched[{#TOPIC}]'
+              delay: '0'
+              value_type: UNSIGNED
+              description: 'Total records fetched from topic {#TOPIC}'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$[?(@.name=="redpanda_kafka_records_fetched_total" && @.labels.redpanda_topic=="{#TOPIC}")].value'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: '[0]'
+                - type: JAVASCRIPT
+                  parameters:
+                    - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+              master_item:
+                key: redpanda.prom.metrics
+              tags:
+                - tag: component
+                  value: topic
+                - tag: topic
+                  value: '{#TOPIC}'
+            - uuid: fc80cc9208ce4396901b4d024ae5b273
+              name: 'Redpanda: Topic [{#TOPIC}]: Leadership changes'
+              type: DEPENDENT
+              key: 'redpanda.topic.leadership.changes[{#TOPIC}]'
+              delay: '0'
+              value_type: UNSIGNED
+              description: 'Number of leadership changes for topic {#TOPIC}'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$[?(@.name=="redpanda_raft_leadership_changes" && @.labels.redpanda_topic=="{#TOPIC}")].value'
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: '[0]'
+                - type: JAVASCRIPT
+                  parameters:
+                    - 'var arr = JSON.parse(value); var sum = 0; for (var i = 0; i < arr.length; i++) { sum += Number(arr[i]); } return sum;'
+              master_item:
+                key: redpanda.prom.metrics
+              tags:
+                - tag: component
+                  value: topic
+                - tag: topic
+                  value: '{#TOPIC}'
+          master_item:
+            key: redpanda.prom.metrics
+          preprocessing:
+            - type: JAVASCRIPT
+              parameters:
+                - |
+                  var data = JSON.parse(value);
+                  var topics = {};
+                  
+                  for (var i = 0; i < data.length; i++) {
+                      if (data[i].labels && data[i].labels.redpanda_topic) {
+                          topics[data[i].labels.redpanda_topic] = true;
+                      }
+                  }
+                  
+                  var lld = [];
+                  for (var topic in topics) {
+                      lld.push({"{#TOPIC}": topic});
+                  }
+                  
+                  return JSON.stringify(lld);
+      tags:
+        - tag: class
+          value: application
+        - tag: target
+          value: redpanda
+      macros:
+        - macro: '{$REDPANDA.HOST}'
+          description: 'IP/DNS for host'
+        - macro: '{$REDPANDA.PORT}'
+          value: '8083'
+          description: 'Port api running'
+        - macro: '{$REDPANDA.PROTOCOL}'
+          value: http
+          description: 'URL protocol http/https'
+        - macro: '{$REDPANDA.DISK.WARN.PUSED}'
+          value: '80'
+          description: 'Warning threshold for disk usage percentage'
+        - macro: '{$REDPANDA.DISK.CRIT.PUSED}'
+          value: '90'
+          description: 'Critical threshold for disk usage percentage'
+      valuemaps:
+        - uuid: fa8392108b74461aadb57d5ad1d45b08
+          name: 'Redpanda broker status'
+          mappings:
+            - value: '0'
+              newvalue: 'False'
+            - value: '1'
+              newvalue: 'True'
