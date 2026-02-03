@@ -245,7 +245,8 @@ Discovers Kafka Connect connectors via Connect API.
 
 ```
 ├── README.md                      # This documentation
-├── zbx_redpanda_template.yaml     # Zabbix 7.0 template
+|── 7.0/
+|   ├── zbx_redpanda_template.yaml # Zabbix 7.0 template
 ```
 
 ## 🔌 API Endpoints Used
