@@ -9,6 +9,9 @@ zabbix_export:
     - uuid: 0ef4eb253997402b84e747b4b1eb9af9
       template: 'Redpanda by HTTP'
       name: 'Redpanda by HTTP'
+      vendor:
+        name: vfcastr
+        version: 7.0-0
       groups:
         - name: Templates
         - name: Templates/Applications
